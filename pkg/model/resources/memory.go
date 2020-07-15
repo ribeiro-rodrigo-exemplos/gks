@@ -25,7 +25,7 @@ func ConvertToMebiBytes(value string)(int,error){
 		return valueInMebiByte, nil
 	}
 
-	return 0, errors.New("format not supported")
+	return 0, errors.New("memory unit not supported")
 }
 
 func ConvertIntegerToStringMebiBytes(value int)string{

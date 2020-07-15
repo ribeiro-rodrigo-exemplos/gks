@@ -24,6 +24,7 @@ func (scheduler *Scheduler) BuilderContainer()corev1.Container{
 		Image: scheduler.image,
 		Command: scheduler.buildCommands(),
 		VolumeMounts: scheduler.buildVolumeMounts(),
+		Resources: scheduler.resourceRequirements,
 	}
 }
 

@@ -31,6 +31,7 @@ func (controllerManager *ControllerManager) BuilderContainer()corev1.Container{
 		Image:        controllerManager.image,
 		Command:      controllerManager.buildCommands(),
 		VolumeMounts: controllerManager.buildVolumeMounts(),
+		Resources: controllerManager.resourceRequirements,
 	}
 }
 
