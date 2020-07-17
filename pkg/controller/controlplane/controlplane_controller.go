@@ -93,37 +93,10 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, err
 	}
 
-	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: request.Namespace}
-	masterDeployment := &appsv1.Deployment{}
-
-	err = r.client.Get(context.TODO(), clusterNamespacedName, masterDeployment)
-
-	if err != nil {
-		if errors.IsNotFound(err){
-			err = r.createMaster(clusterNamespacedName, instance)
-			if err != nil {
-				return reconcile.Result{}, err
-			}else{
-				return reconcile.Result{}, nil
-			}
-		}
-		return reconcile.Result{}, err
-	}
-
-	desiredMasterModel, err := master.NewMaster(request.NamespacedName, instance.Spec.ControlPlaneMaster, master.NewResourceSplitter())
+	err = r.ensureLatestDeployment(instance)
 
 	if err != nil {
 		return reconcile.Result{}, err
-	}
-
-	desiredMasterDeployment, _ := desiredMasterModel.BuildDeployment()
-
-	deploymentEqual := cmp.DeepEqual(desiredMasterModel, desiredMasterDeployment)()
-
-	if !deploymentEqual.Success() {
-		if err = r.client.Update(context.TODO(), desiredMasterDeployment); err != nil {
-			return reconcile.Result{}, err
-		}
 	}
 
 	return reconcile.Result{}, nil
@@ -144,6 +117,40 @@ func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName,
 
 	if err := r.client.Create(context.TODO(), masterDeployment); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.ControlPlane)error {
+
+	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+	masterDeployment := &appsv1.Deployment{}
+
+	err := r.client.Get(context.TODO(), clusterNamespacedName, masterDeployment)
+
+	if err != nil {
+		if errors.IsNotFound(err){
+			return r.createMaster(clusterNamespacedName, instance)
+		}
+		return err
+	}
+
+	desiredMasterModel, err := master.NewMaster(clusterNamespacedName, instance.Spec.ControlPlaneMaster,
+		master.NewResourceSplitter())
+
+	if err != nil {
+		return err
+	}
+
+	desiredMasterDeployment, _ := desiredMasterModel.BuildDeployment()
+
+	deploymentEqual := cmp.DeepEqual(masterDeployment, desiredMasterDeployment)()
+
+	if !deploymentEqual.Success() {
+		if err = r.client.Update(context.TODO(), desiredMasterDeployment); err != nil {
+			return err
+		}
 	}
 
 	return nil
