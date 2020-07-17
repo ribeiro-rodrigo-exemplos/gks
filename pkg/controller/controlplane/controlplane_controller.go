@@ -5,6 +5,8 @@ import (
 	"gitlab.globoi.com/tks/gks/gks-operator/pkg/model/master"
 	"gotest.tools/assert/cmp"
 	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	gksv1alpha1 "gitlab.globoi.com/tks/gks/gks-operator/pkg/apis/gks/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -77,7 +79,6 @@ type ReconcileControlPlane struct {
 	scheme *runtime.Scheme
 }
 
-
 func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
@@ -93,7 +94,15 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, err
 	}
 
-	err = r.ensureLatestDeployment(instance)
+	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+
+	_, err = r.ensureLatestLoadBalancer(instance, clusterNamespacedName)
+
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	err = r.ensureLatestDeployment(instance, clusterNamespacedName)
 
 	if err != nil {
 		return reconcile.Result{}, err
@@ -122,9 +131,44 @@ func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName,
 	return nil
 }
 
-func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.ControlPlane)error {
+func (r *ReconcileControlPlane) createLoadBalancer(instance *gksv1alpha1.ControlPlane,
+	namespacedName types.NamespacedName)(*corev1.Service, error){
 
-	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+	serviceLoadBalancer := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespacedName.Name,
+			Namespace: namespacedName.Namespace,
+			Labels: map[string]string{
+				"app":"load-balancer",
+				"cluster": namespacedName.Name,
+				"tier": "control-plane",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceType("LoadBalancer"),
+			Ports: []corev1.ServicePort{
+				{ Port: 6443, TargetPort: intstr.FromInt(6443)},
+			},
+			Selector: map[string]string{
+				"cluster": namespacedName.Name,
+			},
+		},
+	}
+
+	if err := controllerutil.SetControllerReference(instance, serviceLoadBalancer, r.scheme); err != nil {
+		return nil, err
+	}
+
+	if err := r.client.Create(context.TODO(), serviceLoadBalancer); err != nil {
+		return nil, err
+	}
+
+	return serviceLoadBalancer, nil
+}
+
+func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.ControlPlane,
+	clusterNamespacedName types.NamespacedName)error {
+
 	masterDeployment := &appsv1.Deployment{}
 
 	err := r.client.Get(context.TODO(), clusterNamespacedName, masterDeployment)
@@ -154,4 +198,25 @@ func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.Con
 	}
 
 	return nil
+}
+
+func (r *ReconcileControlPlane) ensureLatestLoadBalancer(instance *gksv1alpha1.ControlPlane,
+	clusterNamespacedName types.NamespacedName)(*corev1.Service, error){
+
+	serviceLoadBalancer := &corev1.Service{}
+
+	err := r.client.Get(context.TODO(), clusterNamespacedName, serviceLoadBalancer)
+
+	if err != nil {
+		if errors.IsNotFound(err){
+			serviceLoadBalancer, err = r.createLoadBalancer(instance,clusterNamespacedName)
+			if err != nil {
+				return nil, err
+			}
+			return serviceLoadBalancer, nil
+		}
+		return nil, err
+	}
+
+	return serviceLoadBalancer, nil
 }
