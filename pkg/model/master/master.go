@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"strings"
 )
 
 type Master struct{
@@ -17,9 +18,10 @@ type Master struct{
 	controllerManager ControllerManager
 }
 
-func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPlaneMaster, splitter ResourceSplitter)(*Master,error) {
+func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPlaneMaster, loadBalancerHostnames []string,
+	splitter ResourceSplitter)(*Master,error) {
 
-	advertiseAddress := "192.168.39.42"
+	advertiseAddress := strings.Join(loadBalancerHostnames, ",")
 
 	otherComponentsDivisorResourcesStrategy := func(res int)int{
 		return res/3

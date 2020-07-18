@@ -7,6 +7,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gksv1alpha1 "gitlab.globoi.com/tks/gks/gks-operator/pkg/apis/gks/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -56,8 +58,23 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	}
 
 	// TODO(user): Modify this to be the types you create that are owned by the primary resource
-	// Watch for changes to secondary resource Pods and requeue the owner ControlPlane
-	err = c.Watch(&source.Kind{Type: &corev1.Pod{}}, &handler.EnqueueRequestForOwner{
+	// Watch for changes to secondary resource Deployment and requeue the owner ControlPlane
+	err = c.Watch(&source.Kind{Type: &appsv1.Deployment{}}, &handler.EnqueueRequestForObject{
+		//IsController: true,
+		//OwnerType:    &gksv1alpha1.ControlPlane{},
+	}, predicate.GenerationChangedPredicate{Funcs: predicate.Funcs{DeleteFunc: func(e event.DeleteEvent) bool{
+
+		if _, ok := e.Meta.GetLabels()["tier"]; ok {
+			return true
+		}
+		return false
+	}}})
+	if err != nil {
+		return err
+	}
+
+	// Watch for changes to secondary resource Service and requeue the owner ControlPlane
+	err = c.Watch(&source.Kind{Type: &corev1.Service{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &gksv1alpha1.ControlPlane{},
 	})
@@ -96,13 +113,14 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 
 	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
 
-	_, err = r.ensureLatestLoadBalancer(instance, clusterNamespacedName)
+	serviceLoadBalancer, err := r.ensureLatestLoadBalancer(instance, clusterNamespacedName)
+	loadBalancerHostNames := r.extractLoadBalancerHostNames(serviceLoadBalancer)
 
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	err = r.ensureLatestDeployment(instance, clusterNamespacedName)
+	err = r.ensureLatestDeployment(instance, loadBalancerHostNames, clusterNamespacedName)
 
 	if err != nil {
 		return reconcile.Result{}, err
@@ -111,8 +129,10 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName, instance *gksv1alpha1.ControlPlane)error{
-	masterModel, err := master.NewMaster(namspacedName, instance.Spec.ControlPlaneMaster, master.NewResourceSplitter())
+func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName, instance *gksv1alpha1.ControlPlane,
+	loadBalancerHostnames []string)error{
+	masterModel, err := master.NewMaster(namspacedName, instance.Spec.ControlPlaneMaster, loadBalancerHostnames,
+		master.NewResourceSplitter())
 
 	if err != nil {
 		return err
@@ -129,6 +149,20 @@ func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName,
 	}
 
 	return nil
+}
+
+func (r *ReconcileControlPlane) extractLoadBalancerHostNames(loadBalancer *corev1.Service)[]string{
+	hostnames := make([]string, len(loadBalancer.Status.LoadBalancer.Ingress))
+
+	for index,ingress := range loadBalancer.Status.LoadBalancer.Ingress{
+		hostnames[index] = ingress.Hostname
+	}
+
+	if len(hostnames) == 0 {
+		hostnames = []string{loadBalancer.Spec.ClusterIP}
+	}
+
+	return hostnames
 }
 
 func (r *ReconcileControlPlane) createLoadBalancer(instance *gksv1alpha1.ControlPlane,
@@ -167,7 +201,7 @@ func (r *ReconcileControlPlane) createLoadBalancer(instance *gksv1alpha1.Control
 }
 
 func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.ControlPlane,
-	clusterNamespacedName types.NamespacedName)error {
+	loadBalancerHostnames []string, clusterNamespacedName types.NamespacedName)error {
 
 	masterDeployment := &appsv1.Deployment{}
 
@@ -175,13 +209,13 @@ func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.Con
 
 	if err != nil {
 		if errors.IsNotFound(err){
-			return r.createMaster(clusterNamespacedName, instance)
+			return r.createMaster(clusterNamespacedName, instance, loadBalancerHostnames)
 		}
 		return err
 	}
 
 	desiredMasterModel, err := master.NewMaster(clusterNamespacedName, instance.Spec.ControlPlaneMaster,
-		master.NewResourceSplitter())
+		loadBalancerHostnames, master.NewResourceSplitter())
 
 	if err != nil {
 		return err
