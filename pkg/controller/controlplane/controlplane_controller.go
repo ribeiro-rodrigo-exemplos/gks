@@ -2,25 +2,25 @@ package controlplane
 
 import (
 	"context"
+	gksv1alpha1 "gitlab.globoi.com/tks/gks/gks-operator/pkg/apis/gks/v1alpha1"
 	"gitlab.globoi.com/tks/gks/gks-operator/pkg/model/master"
 	"gotest.tools/assert/cmp"
 	appsv1 "k8s.io/api/apps/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	gksv1alpha1 "gitlab.globoi.com/tks/gks/gks-operator/pkg/apis/gks/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/kubernetes/pkg/util/slice"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
@@ -60,8 +60,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	// TODO(user): Modify this to be the types you create that are owned by the primary resource
 	// Watch for changes to secondary resource Deployment and requeue the owner ControlPlane
 	err = c.Watch(&source.Kind{Type: &appsv1.Deployment{}}, &handler.EnqueueRequestForObject{
-		//IsController: true,
-		//OwnerType:    &gksv1alpha1.ControlPlane{},
+
 	}, predicate.GenerationChangedPredicate{Funcs: predicate.Funcs{DeleteFunc: func(e event.DeleteEvent) bool{
 
 		if _, ok := e.Meta.GetLabels()["tier"]; ok {
@@ -112,6 +111,35 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
+	controlPlaneFinalizerName := "controlplane.finalizers.gks.globo.com"
+
+	if instance.GetDeletionTimestamp().IsZero() {
+		if !slice.ContainsString(instance.GetFinalizers(), controlPlaneFinalizerName, nil){
+			instance.SetFinalizers(append(instance.GetFinalizers(),controlPlaneFinalizerName))
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				return reconcile.Result{}, err
+			}
+		}
+	}else{
+		if slice.ContainsString(instance.GetFinalizers(), controlPlaneFinalizerName, nil){
+			masterDeployment := &appsv1.Deployment{}
+			if err := r.client.Get(context.TODO(), clusterNamespacedName, masterDeployment); err == nil {
+				if err := r.client.Delete(context.TODO(), masterDeployment); err != nil {
+					return reconcile.Result{}, err
+				}
+			}else{
+				if !errors.IsNotFound(err){
+					return reconcile.Result{}, err
+				}
+			}
+
+			instance.SetFinalizers(slice.RemoveString(instance.GetFinalizers(),controlPlaneFinalizerName, nil))
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				return reconcile.Result{}, err
+			}
+		}
+		return reconcile.Result{}, nil
+	}
 
 	serviceLoadBalancer, err := r.ensureLatestLoadBalancer(instance, clusterNamespacedName)
 	loadBalancerHostNames := r.extractLoadBalancerHostNames(serviceLoadBalancer)
