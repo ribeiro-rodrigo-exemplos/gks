@@ -111,34 +111,9 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	clusterNamespacedName := types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}
-	controlPlaneFinalizerName := "controlplane.finalizers.gks.globo.com"
 
-	if instance.GetDeletionTimestamp().IsZero() {
-		if !slice.ContainsString(instance.GetFinalizers(), controlPlaneFinalizerName, nil){
-			instance.SetFinalizers(append(instance.GetFinalizers(),controlPlaneFinalizerName))
-			if err := r.client.Update(context.TODO(), instance); err != nil {
-				return reconcile.Result{}, err
-			}
-		}
-	}else{
-		if slice.ContainsString(instance.GetFinalizers(), controlPlaneFinalizerName, nil){
-			masterDeployment := &appsv1.Deployment{}
-			if err := r.client.Get(context.TODO(), clusterNamespacedName, masterDeployment); err == nil {
-				if err := r.client.Delete(context.TODO(), masterDeployment); err != nil {
-					return reconcile.Result{}, err
-				}
-			}else{
-				if !errors.IsNotFound(err){
-					return reconcile.Result{}, err
-				}
-			}
-
-			instance.SetFinalizers(slice.RemoveString(instance.GetFinalizers(),controlPlaneFinalizerName, nil))
-			if err := r.client.Update(context.TODO(), instance); err != nil {
-				return reconcile.Result{}, err
-			}
-		}
-		return reconcile.Result{}, nil
+	if finalized, err := r.ensureFinalizer(instance, clusterNamespacedName); finalized || err != nil {
+		return reconcile.Result{}, err
 	}
 
 	serviceLoadBalancer, err := r.ensureLatestLoadBalancer(instance, clusterNamespacedName)
@@ -226,6 +201,42 @@ func (r *ReconcileControlPlane) createLoadBalancer(instance *gksv1alpha1.Control
 	}
 
 	return serviceLoadBalancer, nil
+}
+
+func (r *ReconcileControlPlane) ensureFinalizer(instance *gksv1alpha1.ControlPlane,
+	clusterNamespacedName types.NamespacedName)(bool,error){
+
+	controlPlaneFinalizerName := "controlplane.finalizers.gks.globo.com"
+
+	if instance.GetDeletionTimestamp().IsZero() {
+		if !slice.ContainsString(instance.GetFinalizers(), controlPlaneFinalizerName, nil){
+			instance.SetFinalizers(append(instance.GetFinalizers(),controlPlaneFinalizerName))
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				return false, err
+			}
+		}
+	}else{
+		if slice.ContainsString(instance.GetFinalizers(), controlPlaneFinalizerName, nil){
+			masterDeployment := &appsv1.Deployment{}
+			if err := r.client.Get(context.TODO(), clusterNamespacedName, masterDeployment); err == nil {
+				if err := r.client.Delete(context.TODO(), masterDeployment); err != nil {
+					return true, err
+				}
+			}else{
+				if !errors.IsNotFound(err){
+					return true, err
+				}
+			}
+
+			instance.SetFinalizers(slice.RemoveString(instance.GetFinalizers(),controlPlaneFinalizerName, nil))
+			if err := r.client.Update(context.TODO(), instance); err != nil {
+				return true, err
+			}
+		}
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.ControlPlane,
