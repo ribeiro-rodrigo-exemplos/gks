@@ -73,7 +73,7 @@ func (in *ControlPlaneList) DeepCopyObject() runtime.Object {
 func (in *ControlPlaneMaster) DeepCopyInto(out *ControlPlaneMaster) {
 	*out = *in
 	in.ControlPlaneMasterSettings.DeepCopyInto(&out.ControlPlaneMasterSettings)
-	out.ControlPlaneMasterResources = in.ControlPlaneMasterResources
+	in.ResourceRequirements.DeepCopyInto(&out.ResourceRequirements)
 	return
 }
 

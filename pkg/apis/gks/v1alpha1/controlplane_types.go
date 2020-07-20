@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -10,7 +11,7 @@ import (
 type ControlPlaneMaster struct {
 	Count int `json:"count,omitempty"`
 	ControlPlaneMasterSettings `json:"settings,omitempty"`
-	ControlPlaneMasterResources `json:"resources,omitempty"`
+	corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 type ControlPlaneMasterSettings struct {
@@ -19,16 +20,6 @@ type ControlPlaneMasterSettings struct {
 	ServiceClusterIPRange string `json:"serviceClusterIpRange,omitempty"`
 	ClusterCIDR string `json:"clusterCidr,omitempty"`
 	EncryptionSecretName string `json:"encryptionSecret,omitempty"`
-}
-
-type ControlPlaneMasterResources struct {
-	ControlPlaneMasterResourcesRequests ControlPlaneMasterResourcesValues `json:"requests,omitempty"`
-	ControlPlaneMasterResourcesLimits ControlPlaneMasterResourcesValues `json:"limits,omitempty"`
-}
-
-type ControlPlaneMasterResourcesValues struct {
-	Memory string `json:"memory,omitempty"`
-	CPU string `json:"cpu,omitempty"`
 }
 
 // ControlPlaneSpec defines the desired state of ControlPlane

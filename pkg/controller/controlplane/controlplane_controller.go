@@ -2,9 +2,9 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
 	gksv1alpha1 "gitlab.globoi.com/tks/gks/gks-operator/pkg/apis/gks/v1alpha1"
 	"gitlab.globoi.com/tks/gks/gks-operator/pkg/model/master"
-	"gotest.tools/assert/cmp"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -62,7 +62,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	err = c.Watch(&source.Kind{Type: &appsv1.Deployment{}}, &handler.EnqueueRequestForObject{
 
 	}, predicate.GenerationChangedPredicate{Funcs: predicate.Funcs{DeleteFunc: func(e event.DeleteEvent) bool{
-
+		fmt.Println(e.Meta.GetLabels())
 		if _, ok := e.Meta.GetLabels()["tier"]; ok {
 			return true
 		}
@@ -117,10 +117,15 @@ func (r *ReconcileControlPlane) Reconcile(request reconcile.Request) (reconcile.
 	}
 
 	serviceLoadBalancer, err := r.ensureLatestLoadBalancer(instance, clusterNamespacedName)
-	loadBalancerHostNames := r.extractLoadBalancerHostNames(serviceLoadBalancer)
 
 	if err != nil {
 		return reconcile.Result{}, err
+	}
+
+	loadBalancerHostNames := r.extractLoadBalancerHostNames(serviceLoadBalancer)
+
+	if len(loadBalancerHostNames) == 0 {
+		return reconcile.Result{Requeue: true}, nil
 	}
 
 	err = r.ensureLatestDeployment(instance, loadBalancerHostNames, clusterNamespacedName)
@@ -141,7 +146,7 @@ func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName,
 		return err
 	}
 
-	masterDeployment, _ := masterModel.BuildDeployment()
+	masterDeployment := masterModel.BuildDeployment()
 
 	if err := controllerutil.SetControllerReference(instance, masterDeployment, r.scheme); err != nil {
 		return err
@@ -158,12 +163,12 @@ func (r *ReconcileControlPlane) extractLoadBalancerHostNames(loadBalancer *corev
 	hostnames := make([]string, len(loadBalancer.Status.LoadBalancer.Ingress))
 
 	for index,ingress := range loadBalancer.Status.LoadBalancer.Ingress{
-		hostnames[index] = ingress.Hostname
+		hostnames[index] = ingress.IP
 	}
 
-	if len(hostnames) == 0 {
+	/*if len(hostnames) == 0 {
 		hostnames = []string{loadBalancer.Spec.ClusterIP}
-	}
+	} */
 
 	return hostnames
 }
@@ -260,12 +265,8 @@ func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.Con
 		return err
 	}
 
-	desiredMasterDeployment, _ := desiredMasterModel.BuildDeployment()
-
-	deploymentEqual := cmp.DeepEqual(masterDeployment, desiredMasterDeployment)()
-
-	if !deploymentEqual.Success() {
-		if err = r.client.Update(context.TODO(), desiredMasterDeployment); err != nil {
+	if !desiredMasterModel.EqualDeployment(masterDeployment){
+		if err = r.client.Update(context.TODO(), desiredMasterModel.BuildDeployment()); err != nil {
 			return err
 		}
 	}

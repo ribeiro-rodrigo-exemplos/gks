@@ -1,10 +1,9 @@
 package master
 
 import (
-	"gitlab.globoi.com/tks/gks/gks-operator/pkg/apis/gks/v1alpha1"
 	"gitlab.globoi.com/tks/gks/gks-operator/pkg/model/resources"
-	kuberesources "k8s.io/apimachinery/pkg/api/resource"
 	corev1 "k8s.io/api/core/v1"
+	kuberesources "k8s.io/apimachinery/pkg/api/resource"
 )
 
 type ResourceSplitter struct {}
@@ -13,32 +12,32 @@ func NewResourceSplitter()ResourceSplitter{
 	return ResourceSplitter{}
 }
 
-func (splitter *ResourceSplitter) split(controlPlaneResources v1alpha1.ControlPlaneMasterResources,
+func (splitter *ResourceSplitter) split(controlPlaneResources corev1.ResourceRequirements,
 	divisorStrategy func(res int)int)(*corev1.ResourceRequirements, error){
 
 	res := corev1.ResourceRequirements{}
-	requests := controlPlaneResources.ControlPlaneMasterResourcesRequests
-	limits := controlPlaneResources.ControlPlaneMasterResourcesLimits
+	requests := controlPlaneResources.Requests
+	limits := controlPlaneResources.Limits
 
-	cpuRequestsValue, err := resources.ConvertToIntegerMiliCores(requests.CPU)
-
-	if err != nil {
-		return nil, err
-	}
-
-	cpuLimitValue, 	err := resources.ConvertToIntegerMiliCores(limits.CPU)
+	cpuRequestsValue, err := resources.ConvertToIntegerMiliCores(requests.Cpu().String())
 
 	if err != nil {
 		return nil, err
 	}
 
-	memoryRequestsValue, err := resources.ConvertToMebiBytes(requests.Memory)
+	cpuLimitValue, 	err := resources.ConvertToIntegerMiliCores(limits.Cpu().String())
 
 	if err != nil {
 		return nil, err
 	}
 
-	memoryLimitValue, err := resources.ConvertToMebiBytes(limits.Memory)
+	memoryRequestsValue, err := resources.ConvertToMebiBytes(requests.Memory().String())
+
+	if err != nil {
+		return nil, err
+	}
+
+	memoryLimitValue, err := resources.ConvertToMebiBytes(limits.Memory().String())
 
 	if err != nil {
 		return nil, err
