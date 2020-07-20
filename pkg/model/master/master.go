@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"reflect"
 	"strings"
 )
 
@@ -26,7 +27,7 @@ func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPla
 	otherComponentsDivisorResourcesStrategy := func(res int)int{
 		return res/3
 	}
-	otherComponentsResources,err := splitter.split(settings.ControlPlaneMasterResources,otherComponentsDivisorResourcesStrategy)
+	otherComponentsResources,err := splitter.split(settings.ResourceRequirements,otherComponentsDivisorResourcesStrategy)
 
 	if err != nil {
 		return nil, err
@@ -35,7 +36,7 @@ func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPla
 	apiServerDivisorResourcesStrategy := func(res int)int{
 		return otherComponentsDivisorResourcesStrategy(res) + res%3
 	}
-	apiServerResources,err := splitter.split(settings.ControlPlaneMasterResources,apiServerDivisorResourcesStrategy)
+	apiServerResources,err := splitter.split(settings.ResourceRequirements,apiServerDivisorResourcesStrategy)
 
 	if err != nil {
 		return nil, err
@@ -57,7 +58,7 @@ func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPla
 	}, nil
 }
 
-func (master *Master) BuildDeployment()(*appsv1.Deployment,error){
+func (master *Master) BuildDeployment()*appsv1.Deployment{
 	replicas := int32(master.settings.Count)
 
 	return &appsv1.Deployment{
@@ -73,7 +74,17 @@ func (master *Master) BuildDeployment()(*appsv1.Deployment,error){
 			},
 			Template: master.buildPod(),
 		},
-	}, nil
+	}
+}
+
+func (master *Master) EqualDeployment(deployment *appsv1.Deployment)bool{
+	currentDeployment := master.BuildDeployment()
+
+	if !reflect.DeepEqual(currentDeployment.Labels, deployment.Labels){
+		return false
+	}
+
+	return true
 }
 
 func (master *Master) buildPod()corev1.PodTemplateSpec{
