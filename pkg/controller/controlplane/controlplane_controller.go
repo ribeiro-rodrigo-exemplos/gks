@@ -160,17 +160,17 @@ func (r *ReconcileControlPlane) createMaster(namspacedName types.NamespacedName,
 }
 
 func (r *ReconcileControlPlane) extractLoadBalancerHostNames(loadBalancer *corev1.Service)[]string{
-	hostnames := make([]string, len(loadBalancer.Status.LoadBalancer.Ingress))
+	ips := make([]string, len(loadBalancer.Status.LoadBalancer.Ingress))
 
 	for index,ingress := range loadBalancer.Status.LoadBalancer.Ingress{
-		hostnames[index] = ingress.IP
+		ips[index] = ingress.IP
 	}
 
-	/*if len(hostnames) == 0 {
-		hostnames = []string{loadBalancer.Spec.ClusterIP}
+	/*if len(ips) == 0 {
+		ips = []string{loadBalancer.Spec.ClusterIP}
 	} */
 
-	return hostnames
+	return ips
 }
 
 func (r *ReconcileControlPlane) createLoadBalancer(instance *gksv1alpha1.ControlPlane,
@@ -265,7 +265,13 @@ func (r *ReconcileControlPlane) ensureLatestDeployment(instance *gksv1alpha1.Con
 		return err
 	}
 
-	if !desiredMasterModel.EqualDeployment(masterDeployment){
+	equal, err := desiredMasterModel.EqualDeployment(masterDeployment)
+
+	if err != nil {
+		return err
+	}
+
+	if !equal{
 		if err = r.client.Update(context.TODO(), desiredMasterModel.BuildDeployment()); err != nil {
 			return err
 		}

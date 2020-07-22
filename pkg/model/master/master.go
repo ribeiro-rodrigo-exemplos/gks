@@ -17,17 +17,18 @@ type Master struct{
 	apiServer apiServer
 	scheduler Scheduler
 	controllerManager ControllerManager
+	resourceManager ResourcesManager
 }
 
 func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPlaneMaster, loadBalancerHostnames []string,
-	splitter ResourceSplitter)(*Master,error) {
+	resourcesManager ResourcesManager)(*Master,error) {
 
 	advertiseAddress := strings.Join(loadBalancerHostnames, ",")
 
 	otherComponentsDivisorResourcesStrategy := func(res int)int{
 		return res/3
 	}
-	otherComponentsResources,err := splitter.split(settings.ResourceRequirements,otherComponentsDivisorResourcesStrategy)
+	otherComponentsResources,err := resourcesManager.split(settings.ResourceRequirements,otherComponentsDivisorResourcesStrategy)
 
 	if err != nil {
 		return nil, err
@@ -36,7 +37,7 @@ func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPla
 	apiServerDivisorResourcesStrategy := func(res int)int{
 		return otherComponentsDivisorResourcesStrategy(res) + res%3
 	}
-	apiServerResources,err := splitter.split(settings.ResourceRequirements,apiServerDivisorResourcesStrategy)
+	apiServerResources,err := resourcesManager.split(settings.ResourceRequirements,apiServerDivisorResourcesStrategy)
 
 	if err != nil {
 		return nil, err
@@ -45,6 +46,7 @@ func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPla
 	return &Master{
 		settings: settings,
 		namespacedName: namespacedName,
+		resourceManager: resourcesManager,
 		apiServer: newAPIServer(
 			advertiseAddress,
 			settings.ServiceClusterIPRange,
@@ -56,6 +58,39 @@ func NewMaster(namespacedName types.NamespacedName, settings v1alpha1.ControlPla
 			namespacedName.Name, settings.ServiceClusterIPRange,settings.ClusterCIDR, *otherComponentsResources,
 		),
 	}, nil
+}
+
+func (master *Master) EqualDeployment(deployment *appsv1.Deployment)(bool,error){
+	currentDeployment := master.BuildDeployment()
+
+	if *deployment.Spec.Replicas != *currentDeployment.Spec.Replicas {
+		return false, nil
+	}
+
+	currentRequirements, err := master.resourceManager.sumDeploymentResources(*currentDeployment)
+
+	if err != nil {
+		return false, err
+	}
+
+	deploymentRequirements, err := master.resourceManager.sumDeploymentResources(*deployment)
+
+	if err != nil {
+		return false, err
+	}
+
+	if !reflect.DeepEqual(currentRequirements, deploymentRequirements) {
+		return false, nil
+	}
+
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		currentContainer := master.findContainer(container.Name)
+		if currentContainer == nil || !reflect.DeepEqual(currentContainer.Command, container.Command){
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 func (master *Master) BuildDeployment()*appsv1.Deployment{
@@ -75,16 +110,6 @@ func (master *Master) BuildDeployment()*appsv1.Deployment{
 			Template: master.buildPod(),
 		},
 	}
-}
-
-func (master *Master) EqualDeployment(deployment *appsv1.Deployment)bool{
-	currentDeployment := master.BuildDeployment()
-
-	if !reflect.DeepEqual(currentDeployment.Labels, deployment.Labels){
-		return false
-	}
-
-	return true
 }
 
 func (master *Master) buildPod()corev1.PodTemplateSpec{
@@ -131,5 +156,15 @@ func (*Master) buildSecretVolume(volumeName, secretName string)corev1.Volume{
 			},
 		},
 	}
+}
+
+func (master *Master) findContainer(containerName string)*corev1.Container{
+	deployment := master.BuildDeployment()
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		if container.Name == containerName{
+			return &container
+		}
+	}
+	return nil
 }
 
